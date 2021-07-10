@@ -7,6 +7,7 @@ import socket
 import ssl
 import threading
 import os
+import csv
 from concurrent.futures import ThreadPoolExecutor
 
 class Logger:
@@ -79,7 +80,7 @@ class PortInfo:
 
 		:param port: The port number.
 		:param service_name: The name of the service (protocol) running on the port.
-		:param service_transport: The transport layer protocol operating on the port.
+		:param service_transport: a list of supported transport layer protocols.
 		:param service_desc: A description of the protocol.
 		"""
 
@@ -102,6 +103,8 @@ class Dumper:
 
 		self.target = target
 		self.logger = Logger(enabled=False, color=True)
+		self.service_map = {}
+		self.service_map_loaded = False
 
 	def attach_logger(self, logger):
 		"""
@@ -109,12 +112,80 @@ class Dumper:
 
 		:param logger: the logger to attach to the dumper.
 		"""
-		self.logger = logger		
+		self.logger = logger
+
+	def load_service_map(self, filename="services.csv"):
+		"""
+		Loads and parses the given csv file mapping port numbers to service information.
+
+		:param filename: the name of the csv file.
+		"""
+
+		service_map = {}
+		try:
+			with open(filename) as csvfile:
+				reader = csv.reader(csvfile, delimiter=',', quotechar='"')
+				next(reader) # skip the headings
+				for row in reader:
+
+					# If the port number is empty, skip
+					if row[1] == "":
+						continue
+
+					# Some protocols cover a range of port numbers
+					if '-' in row[1]:
+						parts = row[1].split('-')
+						for port_no in range(int(parts[0]), int(parts[1]) + 1):
+
+							# Most protocols support multiple transport methods
+							if port_no in service_map:
+								entry = service_map[port_no]
+								new_transport = entry.service_transport
+								new_transport.add(row[2])
+								service_map[port_no] = PortInfo(
+									entry.port, 
+									set(entry.service_name), 
+									new_transport, 
+									entry.service_desc
+								) 
+							else:
+								service_map[port_no] = PortInfo(
+									port_no, row[0], set([row[2]]), row[3]
+								)
+
+					else:
+							# Most protocols support multiple transport methods
+							port_no = int(row[1])
+							if port_no in service_map:
+								entry = service_map[port_no]
+								new_transport = entry.service_transport
+								new_transport.add(row[2])
+								service_map[port_no] = PortInfo(
+									entry.port, 
+									entry.service_name, 
+									set(new_transport), 
+									entry.service_desc
+								) 
+							else:
+								service_map[port_no] = PortInfo(
+									int(port_no), row[0], set([row[2]]), row[3]
+								)
+
+			self.service_map_loaded = True
+
+		except Exception as e:
+			self.logger.log_status(
+				"Unable to load or parse service map. Service information will not be available when portscanning (Reason: {})".format(e), Logger.COLOR_INFO)
+
+			self.service_map_loaded = False
+
+		return service_map
 
 	def get_ip_info(self):
 		"""
 		Retrieve the information about the IP address from ip-api.com.
 		"""
+
 		base_url = "http://ip-api.com/json/"
 		url_params = "?fields=status,message,continent,continentCode,country,countryCode,region,regionName,city,district,zip,lat,lon,timezone,currency,isp,org,as,asname,reverse,mobile,proxy,query"
 		self.logger.info("Requesting information from {}".format(base_url))
@@ -203,17 +274,13 @@ class Dumper:
 		try:
 			con = s.connect((self.target, port_no))
 			try:
-				service_info = find_service(port_no)
-				port = str(port_no)
-				service_name = service_info[0]
-				service_transport = service_info[2]
-				service_desc = service_info[3]
-				callback(PortInfo(port, service_name, service_transport, service_desc))
-			except Exception as e:
-				self.logger.error("Unable to scan port {} (Reason: {})".format(str(port_no), e))
+				service_info = self.find_service(port_no)
+				callback(service_info)
+			except Exception as e1:
+				self.logger.error("Unable to scan port {} (Reason: {})".format(port_no, e1))
 			con.close()
-		except Exception as e:
-			pass
+		except Exception:
+			pass # port must be closed
 
 	def get_open_ports(self, callback, workers=100, start=1, end=1000, timeout=5):
 		"""
@@ -226,16 +293,38 @@ class Dumper:
 		:param timeout: the time to wait for a response.
 		"""
 
+		# If the service map is not loaded yet, then try to load it
+		if self.service_map_loaded == False:
+			self.service_map = self.load_service_map()
+			
+
 		self.logger.info("Portscanning {} for open ports in the range {}-{}".format(self.target, start, end))
-		self.logger.no_status("+-------+------------------------------+-----------+{}+".format("-" * 50))
-		self.logger.no_status("| {} | {} | {} | {} |".format("Port".ljust(5), "Protocol".ljust(28), "Transport".ljust(9), "Description".ljust(48)))
-		self.logger.no_status("+-------+------------------------------+-----------+{}+".format("-" * 50))
+		self.logger.no_status("+----------+------------------------------+-------------------------+{}+".format("-" * 50))
+		self.logger.no_status("| {} | {} | {} | {} |".format("Port No".ljust(8), "Protocol".ljust(28), "Transport".ljust(23), "Description".ljust(48)))
+		self.logger.no_status("+----------+------------------------------+-------------------------+{}+".format("-" * 50))
 		with ThreadPoolExecutor(max_workers=workers) as executor:
 			for port in range(start, end+1):
 				executor.submit(self.__check_port, port, callback, timeout)
 
-		self.logger.no_status("+-------+------------------------------+-----------+{}+" .format("-" * 50))
+		self.logger.no_status("+----------+------------------------------+-------------------------+{}+" .format("-" * 50))
 		self.logger.success("Portscan finished")
+
+	
+	def find_service(self, port_no):
+		"""
+		Retrieves information about the service running on the given port.
+		This information is read from services.csv.
+
+		:param port_no: the port number to find the service / protocol for.
+		"""
+
+		try:
+			if self.service_map_loaded:
+				return self.service_map.get(port_no)
+		except Exception:
+			pass
+
+		return PortInfo(port_no, "Unknown", "Unknown", "Unknown")
 
 
 def print_dict(d):
@@ -249,39 +338,18 @@ def print_dict(d):
 		print("{}: {}".format(k.ljust(20), v))
 
 
-def find_service(port_no):
-	"""
-	Retrieves information about the service running on the given port.
-	This information is read from services.csv.
-
-	:param port_no: the port number to find the service / protocol for.
-	"""
-
-	if os.path.isfile("services.csv"):
-		f = open("services.csv")
-		line = f.readline()
-		while line != '':
-			if line.count(",") < 11:
-				line += f.readline()
-			else:
-				if line.split(",")[1] == str(port_no):
-					f.close()
-					return line.split(",")
-				line = f.readline()
-		f.close()
-
-	return ["Unknown"] * 12
-
-
 def print_port_info(portinfo):
 	"""
 	Prints the information of a port formatted to match the table in Dumper.get_open_ports.
 	
 	:param portinfo: a PortInfo object to display as a table.
 	"""
-	port = str(portinfo.port).ljust(5)
+
+	service_transport_joined = ','.join(portinfo.service_transport)
+
+	port = str(portinfo.port).ljust(8)
 	service_name = (portinfo.service_name[:25] + "..." if len(portinfo.service_name) >= 28 else portinfo.service_name).ljust(28)
-	service_transport = portinfo.service_transport.ljust(9)
+	service_transport = (service_transport_joined[:20] + "..." if len(service_transport_joined) >= 23 else service_transport_joined).ljust(23)
 	service_desc = (portinfo.service_desc[:45] + "..." if len(portinfo.service_desc) >= 48 else portinfo.service_desc).ljust(48)
 	print("    | {} | {} | {} | {} |".format(port, service_name, service_transport, service_desc))
 
