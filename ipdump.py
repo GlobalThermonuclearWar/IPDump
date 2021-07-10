@@ -132,30 +132,18 @@ class Dumper:
 					if row[1] == "":
 						continue
 
-					# Some protocols cover a range of port numbers
+					port_numbers = []
+
 					if '-' in row[1]:
 						parts = row[1].split('-')
-						for port_no in range(int(parts[0]), int(parts[1]) + 1):
-
-							# Most protocols support multiple transport methods
-							if port_no in service_map:
-								entry = service_map[port_no]
-								new_transport = entry.service_transport
-								new_transport.add(row[2])
-								service_map[port_no] = PortInfo(
-									entry.port, 
-									set(entry.service_name), 
-									new_transport, 
-									entry.service_desc
-								) 
-							else:
-								service_map[port_no] = PortInfo(
-									port_no, row[0], set([row[2]]), row[3]
-								)
-
+						port_numbers = [int(x) for x in range(int(parts[1]), int(parts[1]) + 1)] 
 					else:
+						port_numbers = [int(row[1])]
+
+
+					for port_no in port_numbers:
+
 						# Most protocols support multiple transport methods
-						port_no = int(row[1])
 						if port_no in service_map:
 							entry = service_map[port_no]
 							new_transport = entry.service_transport
@@ -163,12 +151,12 @@ class Dumper:
 							service_map[port_no] = PortInfo(
 								entry.port, 
 								entry.service_name, 
-								set(new_transport), 
+								new_transport, 
 								entry.service_desc
 							) 
 						else:
 							service_map[port_no] = PortInfo(
-								int(port_no), row[0], set([row[2]]), row[3]
+								port_no, row[0], set([row[2]]), row[3]
 							)
 
 			self.service_map_loaded = True
@@ -280,7 +268,7 @@ class Dumper:
 				self.logger.error("Unable to scan port {} (Reason: {})".format(port_no, e1))
 			con.close()
 		except Exception:
-			pass # port must be closed
+			pass # port is probably closed
 
 	def get_open_ports(self, callback, workers=100, start=1, end=1000, timeout=5):
 		"""
@@ -320,7 +308,7 @@ class Dumper:
 
 		try:
 			if self.service_map_loaded:
-				return self.service_map.get(port_no)
+				return self.service_map[port_no]
 		except Exception:
 			pass
 
@@ -374,7 +362,7 @@ if __name__ == "__main__":
 	
 	dumper.attach_logger(logger)
 
-	logger.info("WARNING: I am not liable for any damage (including criminal charges) which may arise from use of this software." \
+	logger.info("WARNING: By using this software you agree that you are liable for any damage (including criminal charges) which may arise from use of this software." \
 		" For more information see the LICENSE file included with this software.\n")
 
 	if args.all != None or args.ip_info != None:
