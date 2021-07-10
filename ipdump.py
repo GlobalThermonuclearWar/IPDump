@@ -363,19 +363,27 @@ if __name__ == "__main__":
 	dumper.attach_logger(logger)
 
 	logger.info("WARNING: By using this software you agree that you are liable for any damage (including criminal charges) which may arise from use of this software." \
-		" For more information see the LICENSE file included with this software.\n")
+		" For more information see the LICENSE file included with this software.")
 
+	done_action = False
 	if args.all != None or args.ip_info != None:
 		print_dict(dumper.get_ip_info())
+		done_action = True
 	if args.all != None or args.ssl_cert != None:
+		done_action = True
 		print_dict(dumper.get_ssl_info(timeout=args.timeout))
 	if args.all != None or args.whois != None:
+		done_action = True
 		print(dumper.get_whois_info(timeout=args.timeout))
 	if args.all != None or args.port_scan != None:
+		done_action = True
 		dumper.get_open_ports(workers=args.workers, 
 			start=int(args.range.split("-")[0]), 
 			end=int(args.range.split("-")[1]), 
 			callback=print_port_info, 
 			timeout=args.timeout)
-		
-	logger.info("Report for {} completed".format(args.host))
+
+	if not done_action:
+		logger.info("No actions specified for {}".format(args.host))
+	else:
+		logger.info("Report for {} completed".format(args.host))
