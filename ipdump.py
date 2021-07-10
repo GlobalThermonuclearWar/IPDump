@@ -154,22 +154,22 @@ class Dumper:
 								)
 
 					else:
-							# Most protocols support multiple transport methods
-							port_no = int(row[1])
-							if port_no in service_map:
-								entry = service_map[port_no]
-								new_transport = entry.service_transport
-								new_transport.add(row[2])
-								service_map[port_no] = PortInfo(
-									entry.port, 
-									entry.service_name, 
-									set(new_transport), 
-									entry.service_desc
-								) 
-							else:
-								service_map[port_no] = PortInfo(
-									int(port_no), row[0], set([row[2]]), row[3]
-								)
+						# Most protocols support multiple transport methods
+						port_no = int(row[1])
+						if port_no in service_map:
+							entry = service_map[port_no]
+							new_transport = entry.service_transport
+							new_transport.add(row[2])
+							service_map[port_no] = PortInfo(
+								entry.port, 
+								entry.service_name, 
+								set(new_transport), 
+								entry.service_desc
+							) 
+						else:
+							service_map[port_no] = PortInfo(
+								int(port_no), row[0], set([row[2]]), row[3]
+							)
 
 			self.service_map_loaded = True
 
